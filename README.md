@@ -1,6 +1,3 @@
-I understand. You're looking for a more generic README that showcases the broad capabilities of Strobes and how this cookbook can help users leverage its power across various use cases. Here's a revised version:
-
-```markdown
 # Strobes Cookbook
 
 Welcome to the Strobes Cookbook! This repository is a comprehensive collection of scripts, examples, and best practices for leveraging the full power of the Strobes platform using the `strobes-gql-client`.
