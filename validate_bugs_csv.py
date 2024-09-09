@@ -176,6 +176,32 @@ def detect_encoding(file_path):
     return result['encoding']
 
 
+def clean_bug_data(bug_data: Dict) -> Dict:
+    def clean_value(value: str) -> str:
+        cleaned = re.sub(r'\s+', ' ', value.strip())
+        cleaned = cleaned.replace('\n', '').replace('\t', '')
+        return cleaned
+
+    important_fields = [
+        'title', 'description', 'mitigation', 'vulnerable_code', 'file_name',
+        'affected_endpoints', 'port', 'package_name', 'region', 'aws_category',
+        'aws_account_id', 'azure_category', 'azure_resource', 'gcp_project_id',
+        'gcp_resource_id'
+    ]
+
+    cleaned_data = {}
+    for key, value in bug_data.items():
+        if isinstance(value, str):
+            if key in important_fields:
+                cleaned_data[key] = clean_value(value)
+            else:
+                cleaned_data[key] = value.strip()
+        else:
+            cleaned_data[key] = value
+
+    return cleaned_data
+
+
 def convert_and_validate_csv(input_file: str, output_file: str) -> Tuple[List[Dict], List[str]]:
     input_encoding = detect_encoding(input_file)
     print(f"Detected encoding: {input_encoding}")
@@ -191,14 +217,14 @@ def convert_and_validate_csv(input_file: str, output_file: str) -> Tuple[List[Di
         writer = csv.DictWriter(outfile, fieldnames=fieldnames)
         writer.writeheader()
 
-        # Start from 2 to account for header row
         for row_num, row in enumerate(reader, start=2):
             converted_row = {k: unicode_to_ascii(v) for k, v in row.items()}
+            cleaned_row = clean_bug_data(converted_row)  # Clean the data
 
             try:
-                if BugsValidator.is_valid_bug_data(converted_row):
-                    valid_data.append(converted_row)
-                    writer.writerow(converted_row)
+                if BugsValidator.is_valid_bug_data(cleaned_row):
+                    valid_data.append(cleaned_row)
+                    writer.writerow(cleaned_row)
             except ValueError as e:
                 errors.append(f"Error in row {row_num}: {str(e)}")
 
@@ -206,8 +232,8 @@ def convert_and_validate_csv(input_file: str, output_file: str) -> Tuple[List[Di
 
 
 # Usage
-input_file = "csv_bugs.csv"
-output_file = "converted_and_validated_bugs.csv"
+input_file = "converted_and_validated_bugs_network.csv"
+output_file = "converted_and_validated_bugs_final.csv"
 
 valid_data, errors = convert_and_validate_csv(input_file, output_file)
 
