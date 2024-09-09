@@ -6,6 +6,7 @@ from typing import Dict, List, Tuple
 from enum import IntEnum
 import ipaddress
 
+
 class AssetType(IntEnum):
     UNKNOWN_ASSET = 0
     WEB = 1
@@ -231,11 +232,13 @@ class AssetType(IntEnum):
     GCP_IAM_POLICY = 221
     USER = 222
 
+
 class CloudType(IntEnum):
     OTHERS = 1
     AWS = 2
     AZURE = 3
     GCP = 4
+
 
 class Sensitivity(IntEnum):
     NONE = 0
@@ -244,15 +247,17 @@ class Sensitivity(IntEnum):
     HIGH = 3
     CRITICAL = 4
 
+
 class Exposed(IntEnum):
     PUBLIC = 1
     PRIVATE = 2
+
 
 class AssetValidator:
     @classmethod
     def is_valid_asset_data(cls, asset_data: Dict) -> bool:
         asset_type = cls.validate_asset_type(asset_data)
-        
+
         if asset_type in [AssetType.WEB, AssetType.MOBILE]:
             cls.validate_web_mobile_asset(asset_data, asset_type)
         elif asset_type == AssetType.NETWORK:
@@ -274,26 +279,33 @@ class AssetValidator:
             if 0 <= asset_type <= 222:
                 return asset_type
             else:
-                raise ValueError(f"Invalid asset type: {asset_type}. Expected a value between 0 and 222.")
+                raise ValueError(f"Invalid asset type: {
+                                 asset_type}. Expected a value between 0 and 222.")
         except ValueError:
-            raise ValueError(f"Invalid asset type: {asset_data.get('asset_type')}. Expected an integer between 0 and 222.")
+            raise ValueError(f"Invalid asset type: {asset_data.get(
+                'asset_type')}. Expected an integer between 0 and 222.")
 
     @classmethod
     def validate_web_mobile_asset(cls, asset_data: Dict, asset_type: int):
         if asset_type == AssetType.WEB:
-            web_target = asset_data.get('asset_target') or asset_data.get('target', '')
+            web_target = asset_data.get(
+                'asset_target') or asset_data.get('target', '')
             if not cls.is_valid_url(web_target):
-                raise ValueError(f"Invalid web target for Web asset (asset_type 1): {web_target}. Expected a valid URL.")
+                raise ValueError(f"Invalid web target for Web asset (asset_type 1): {
+                                 web_target}. Expected a valid URL.")
 
     @classmethod
     def validate_network_asset(cls, asset_data: Dict):
-        network_target = asset_data.get('asset_target') or asset_data.get('ipaddress') or asset_data.get('target')
+        network_target = asset_data.get('asset_target') or asset_data.get(
+            'ipaddress') or asset_data.get('target')
         if network_target:
             target_format = cls.get_network_target_format(network_target)
             if target_format not in ["ipaddress", "hostname"]:
-                raise ValueError(f"Invalid network target for Network asset (asset_type 3): {network_target}. Expected a valid IP address or hostname.")
+                raise ValueError(f"Invalid network target for Network asset (asset_type 3): {
+                                 network_target}. Expected a valid IP address or hostname.")
         else:
-            raise ValueError("Missing network target for Network asset (asset_type 3). Expected a valid IP address or hostname in 'asset_target', 'ipaddress', or 'target' field.")
+            raise ValueError(
+                "Missing network target for Network asset (asset_type 3). Expected a valid IP address or hostname in 'asset_target', 'ipaddress', or 'target' field.")
 
     @classmethod
     def validate_cloud_asset(cls, asset_data: Dict):
@@ -305,13 +317,15 @@ class AssetValidator:
     @staticmethod
     def validate_other_asset(asset_data: Dict):
         if not asset_data.get('asset_target'):
-            raise ValueError(f"Missing asset_target for asset type {asset_data.get('asset_type')}. All assets with type > 4 (except 11) must have an asset_target.")
+            raise ValueError(f"Missing asset_target for asset type {asset_data.get(
+                'asset_type')}. All assets with type > 4 (except 11) must have an asset_target.")
 
     @staticmethod
     def is_valid_url(url: str) -> bool:
         regex = re.compile(
             r'^(?:http|ftp)s?://'  # http:// or https://
-            r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|'  # domain...
+            # domain...
+            r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|'
             r'localhost|'  # localhost...
             r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # ...or ip
             r'(?::\d+)?'  # optional port
@@ -342,10 +356,12 @@ class AssetValidator:
         try:
             result = int(float(value))
             if result not in validator:
-                raise ValueError(f"Invalid {name}: {result}. Expected one of {validator}.")
+                raise ValueError(f"Invalid {name}: {
+                                 result}. Expected one of {validator}.")
             return result
         except ValueError:
-            raise ValueError(f"Invalid {name}: {value}. Expected an integer value from {validator}.")
+            raise ValueError(f"Invalid {name}: {
+                             value}. Expected an integer value from {validator}.")
 
     @classmethod
     def validate_sensitivity(cls, asset_data: Dict):
@@ -367,7 +383,8 @@ class AssetValidator:
             for eip in exclude_ip.split(','):
                 eip = eip.strip()
                 if not cls.is_valid_ipaddress(eip):
-                    raise ValueError(f"Invalid exclude_ip: {eip}. Expected a valid IP address.")
+                    raise ValueError(f"Invalid exclude_ip: {
+                                     eip}. Expected a valid IP address.")
                 validated_exclude_ips.append(eip)
         return validated_exclude_ips
 
@@ -378,8 +395,10 @@ class AssetValidator:
             re.IGNORECASE)
         return re.match(regex, url) is not None
 
+
 def unicode_to_ascii(text):
-    ascii_text = unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('ASCII')
+    ascii_text = unicodedata.normalize('NFKD', text).encode(
+        'ASCII', 'ignore').decode('ASCII')
     replacements = {
         '"': '"',
         '"': '"',
@@ -394,11 +413,37 @@ def unicode_to_ascii(text):
     ascii_text = re.sub(r'[^\x00-\x7F]+', '', ascii_text)
     return ascii_text
 
+
 def detect_encoding(file_path):
     with open(file_path, 'rb') as file:
         raw_data = file.read()
     result = chardet.detect(raw_data)
     return result['encoding']
+
+
+def clean_asset_data(asset_data: Dict) -> Dict:
+    def clean_value(value: str) -> str:
+        cleaned = re.sub(r'\s+', ' ', value.strip())
+        cleaned = cleaned.replace('\n', '').replace('\t', '')
+        return cleaned
+
+    important_fields = [
+        'asset_target', 'target', 'ipaddress', 'hostname', 'exclude_ip',
+        'container_image', 'cloud_account_id', 'cloud_region'
+    ]
+
+    cleaned_data = {}
+    for key, value in asset_data.items():
+        if isinstance(value, str):
+            if key in important_fields:
+                cleaned_data[key] = clean_value(value)
+            else:
+                cleaned_data[key] = value.strip()
+        else:
+            cleaned_data[key] = value
+
+    return cleaned_data
+
 
 def convert_and_validate_csv(input_file: str, output_file: str) -> Tuple[List[Dict], List[str]]:
     input_encoding = detect_encoding(input_file)
@@ -415,20 +460,22 @@ def convert_and_validate_csv(input_file: str, output_file: str) -> Tuple[List[Di
         writer = csv.DictWriter(outfile, fieldnames=fieldnames)
         writer.writeheader()
 
-        for row_num, row in enumerate(reader, start=2):  # Start from 2 to account for header row
+        for row_num, row in enumerate(reader, start=2):
             converted_row = {k: unicode_to_ascii(v) for k, v in row.items()}
-            
+            cleaned_row = clean_asset_data(converted_row)  # Clean the data
+
             try:
-                if AssetValidator.is_valid_asset_data(converted_row):
-                    valid_data.append(converted_row)
-                    writer.writerow(converted_row)
+                if AssetValidator.is_valid_asset_data(cleaned_row):
+                    valid_data.append(cleaned_row)
+                    writer.writerow(cleaned_row)
             except ValueError as e:
                 errors.append(f"Error in row {row_num}: {str(e)}")
 
     return valid_data, errors
 
+
 # Usage
-input_file = "csv_assets.csv"
+input_file = "import_assets_from_csv_Network.csv"
 output_file = "converted_and_validated_assets.csv"
 
 valid_data, errors = convert_and_validate_csv(input_file, output_file)
@@ -441,4 +488,3 @@ if errors:
     print("\nErrors:")
     for error in errors:
         print(error)
-
