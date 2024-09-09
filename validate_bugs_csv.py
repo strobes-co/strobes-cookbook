@@ -183,6 +183,3 @@ if errors:
     for error in errors:
         print(error)
 
-print("\nValid data:")
-for row in valid_data[:5]:  # Print first 5 valid rows as an example
-    print(row)
