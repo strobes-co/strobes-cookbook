@@ -256,7 +256,23 @@ class Exposed(IntEnum):
 class AssetValidator:
     @classmethod
     def is_valid_asset_data(cls, asset_data: Dict) -> bool:
+        """
+        Validate the asset data based on its asset type.
+
+        Args:
+            asset_data (Dict): The asset data to validate.
+
+        Returns:
+            bool: True if the asset data is valid, raises ValueError otherwise.
+        """
         asset_type = cls.validate_asset_type(asset_data)
+
+        AssetValidator.validate_exclude_ips(asset_data)
+        cls.validate_sensitivity(asset_data)
+        cls.validate_exposed(asset_data)
+
+        if asset_type in [AssetType.WEB, AssetType.MOBILE, AssetType.NETWORK]:
+            cls.validate_asset_target(asset_data)
 
         if asset_type in [AssetType.WEB, AssetType.MOBILE]:
             cls.validate_web_mobile_asset(asset_data, asset_type)
@@ -264,76 +280,254 @@ class AssetValidator:
             cls.validate_network_asset(asset_data)
         elif asset_type == AssetType.CLOUD:
             cls.validate_cloud_asset(asset_data)
-        elif asset_type > 4 and asset_type != 11:
-            cls.validate_other_asset(asset_data)
-
-        cls.validate_sensitivity(asset_data)
-        cls.validate_exposed(asset_data)
 
         return True
 
     @staticmethod
-    def validate_asset_type(asset_data: Dict) -> int:
+    def get_network_ip_target_format(target: str) -> str:
+        """
+        Get the format of a network IP target.
+
+        Args:
+            target (str): The network IP target.
+
+        Returns:
+            str: The format of the network IP target.
+        """
+        if AssetValidator.is_valid_ipaddress(target):
+            return "ipaddress"
+        else:
+            return "invalid"
+
+    @staticmethod
+    def get_network_hostname_target_format(target: str) -> str:
+        """
+        Get the format of a network hostname target.
+
+        Args:
+            target (str): The network hostname target.
+
+        Returns:
+            str: The format of the network hostname target.
+        """
+        hostname_pattern = r"^([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9])(\.([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]))*$"
+        if re.match(hostname_pattern, target):
+            return "hostname"
+        else:
+            return "invalid"
+
+    @staticmethod
+    def get_network_macaddress_target_format(target: str) -> str:
+        """
+        Get the format of a network MAC address target.
+
+        Args:
+            target (str): The network MAC address target.
+
+        Returns:
+            str: The format of the network MAC address target.
+        """
+        macaddress_pattern = (
+            r"([0-9A-F]{2}[:]){5}[0-9A-F]{2}|" r"([0-9A-F]{2}[-]){5}[0-9A-F]{2}"
+        )
+        if re.match(
+            macaddress_pattern,
+            string=target,
+            flags=re.IGNORECASE,
+        ):
+            return "mac_address"
+        else:
+            return "invalid"
+
+    @staticmethod
+    def validate_mac(mac_address: str) -> bool:
+        """
+        Validate a MAC address.
+
+        Args:
+            mac_address (str): The MAC address to validate.
+
+        Returns:
+            bool: True if the MAC address is valid, False otherwise.
+        """
+        is_valid_mac = re.match(
+            r"([0-9A-F]{2}[:]){5}[0-9A-F]{2}|" r"([0-9A-F]{2}[-]){5}[0-9A-F]{2}",
+            string=mac_address,
+            flags=re.IGNORECASE,
+        )
         try:
-            asset_type = int(asset_data.get('asset_type', 0))
+            return bool(is_valid_mac.group())  # True if match
+        except AttributeError:
+            return False
+
+    @staticmethod
+    def validate_asset_type(asset_data: Dict) -> int:
+        """
+        Validate the asset type field in the asset data.
+
+        Args:
+            asset_data (Dict): The asset data to validate.
+
+        Returns:
+            int: The validated asset type.
+        """
+        try:
+            asset_type = int(asset_data.get("asset_type", 0))
             if 0 <= asset_type <= 222:
                 return asset_type
             else:
-                raise ValueError(f"Invalid asset type: {
-                                 asset_type}. Expected a value between 0 and 222.")
+                raise ValueError(
+                    f"Invalid asset type: {asset_type}. Expected a value between 0 and 222."
+                )
         except ValueError:
-            raise ValueError(f"Invalid asset type: {asset_data.get(
-                'asset_type')}. Expected an integer between 0 and 222.")
+            raise ValueError(
+                f"Invalid asset type: {asset_data.get('asset_type')}. Expected an integer between 0 and 222."
+            )
 
     @classmethod
     def validate_web_mobile_asset(cls, asset_data: Dict, asset_type: int):
+        """
+        Validate the fields specific to web and mobile assets.
+
+        Args:
+            asset_data (Dict): The asset data to validate.
+            asset_type (int): The type of the asset.
+        """
         if asset_type == AssetType.WEB:
-            web_target = asset_data.get(
-                'asset_target') or asset_data.get('target', '')
+            web_target = (
+                asset_data.get("asset_target")
+                or asset_data.get("target", "")
+                or asset_data.get("name")
+            )
             if not cls.is_valid_url(web_target):
-                raise ValueError(f"Invalid web target for Web asset (asset_type 1): {
-                                 web_target}. Expected a valid URL.")
+                raise ValueError(
+                    f"Invalid web target for Web asset (asset_type 1): {web_target}. Expected a valid URL."
+                )
 
     @classmethod
     def validate_network_asset(cls, asset_data: Dict):
-        network_target = asset_data.get('asset_target') or asset_data.get(
-            'ipaddress') or asset_data.get('target')
-        if network_target:
-            target_format = cls.get_network_target_format(network_target)
-            if target_format not in ["ipaddress", "hostname"]:
-                raise ValueError(f"Invalid network target for Network asset (asset_type 3): {
-                                 network_target}. Expected a valid IP address or hostname.")
-        else:
+        """
+        Validate the fields specific to network assets.
+
+        Args:
+            asset_data (Dict): The asset data to validate.
+        """
+        network_targets = []
+        network_ips = []
+
+        if asset_data.get("ipaddress"):
+            if "-" in asset_data.get("ipaddress"):
+                network_ips.extend(asset_data.get("ipaddress").split("-"))
+            else:
+                network_ips.append(asset_data.get("ipaddress"))
+
+        if asset_data.get("target"):
+            network_targets.append(asset_data.get("target"))
+
+        if asset_data.get("asset_target"):
+            network_targets.append(asset_data.get("asset_target"))
+
+        if asset_data.get("hostname"):
+            network_targets.append(asset_data.get("hostname"))
+
+        if asset_data.get("mac_address"):
+            network_targets.append(asset_data.get("mac_address"))
+
+        if not network_targets and not network_ips:
             raise ValueError(
-                "Missing network target for Network asset (asset_type 3). Expected a valid IP address or hostname in 'asset_target', 'ipaddress', or 'target' field.")
+                "Missing network target for Network asset (asset_type 3). Expected a valid IP address or hostname in 'asset_target', 'ipaddress', or 'target' field."
+            )
+
+        for network_ip in network_ips:
+            target_format = cls.get_network_ip_target_format(network_ip)
+            if target_format == "invalid":
+                raise ValueError(
+                    f"Invalid network ip for Network asset (asset_type 3): {network_ip}. Expected a valid IP address."
+                )
+
+        for network_target in network_targets:
+            ip_target_format = cls.get_network_ip_target_format(network_target)
+            hostname_target_format = cls.get_network_hostname_target_format(
+                network_target
+            )
+            mac_address_format = cls.get_network_macaddress_target_format(
+                network_target
+            )
+            if (
+                ip_target_format == "invalid"
+                and hostname_target_format == "invalid"
+                and mac_address_format == "invalid"
+            ):
+                raise ValueError(
+                    f"Invalid network target for Network asset (asset_type 3): {network_target}. Expected a valid IP address or hostname."
+                )
+
+        if mac_address := asset_data.get("mac_address"):
+            if not AssetValidator.validate_mac(mac_address):
+                raise ValueError(
+                    f"Invalid network mac address for Network asset (asset_type 3): {network_target}. Expected mac address."
+                )
 
     @classmethod
     def validate_cloud_asset(cls, asset_data: Dict):
+        """
+        Validate the fields specific to cloud assets.
+
+        Args:
+            asset_data (Dict): The asset data to validate.
+        """
         cloud_type = cls.validate_optional_field(
-            "cloud_type", [1, 2, 3, 4], asset_data.get('cloud_type', 1)
+            "cloud_type", [1, 2, 3, 4], asset_data.get("cloud_type", 1)
         )
-        asset_data['cloud_type'] = cloud_type
+        asset_data["cloud_type"] = cloud_type
 
     @staticmethod
     def validate_other_asset(asset_data: Dict):
-        if not asset_data.get('asset_target'):
-            raise ValueError(f"Missing asset_target for asset type {asset_data.get(
-                'asset_type')}. All assets with type > 4 (except 11) must have an asset_target.")
+        """
+        Validate the fields specific to other assets.
+
+        Args:
+            asset_data (Dict): The asset data to validate.
+        """
+        if not asset_data.get("asset_target"):
+            raise ValueError(
+                f"Missing asset_target for asset type {asset_data.get('asset_type')}. All assets with type > 4 (except 11) must have an asset_target."
+            )
 
     @staticmethod
     def is_valid_url(url: str) -> bool:
+        """
+        Validate a URL.
+
+        Args:
+            url (str): The URL to validate.
+
+        Returns:
+            bool: True if the URL is valid, False otherwise.
+        """
         regex = re.compile(
-            r'^(?:http|ftp)s?://'  # http:// or https://
+            r"^(?:http|ftp)s?://"  # http:// or https://
             # domain...
-            r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|'
-            r'localhost|'  # localhost...
-            r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # ...or ip
-            r'(?::\d+)?'  # optional port
-            r'(?:/?|[/?]\S+)$', re.IGNORECASE)
+            r"(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|"
+            r"localhost|"  # localhost...
+            r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"  # ...or ip
+            r"(?::\d+)?"  # optional port
+            r"(?:/?|[/?]\S+)$",
+            re.IGNORECASE,
+        )
         return re.match(regex, url) is not None
 
     @staticmethod
     def is_valid_ipaddress(ip: str) -> bool:
+        """
+        Validate an IP address.
+
+        Args:
+            ip (str): The IP address to validate.
+
+        Returns:
+            bool: True if the IP address is valid, False otherwise.
+        """
         try:
             ipaddress.ip_address(ip)
             return True
@@ -342,8 +536,17 @@ class AssetValidator:
 
     @staticmethod
     def get_network_target_format(target: str) -> str:
-        ip_pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
-        hostname_pattern = r'^([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9])(\.([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]))*$'
+        """
+        Get the format of a network target.
+
+        Args:
+            target (str): The network target.
+
+        Returns:
+            str: The format of the network target.
+        """
+        ip_pattern = r"^(\d{1,3}\.){3}\d{1,3}$"
+        hostname_pattern = r"^([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9])(\.([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]))*$"
         if re.match(ip_pattern, target):
             return "ipaddress"
         elif re.match(hostname_pattern, target):
@@ -353,83 +556,215 @@ class AssetValidator:
 
     @staticmethod
     def validate_optional_field(name: str, validator: List[int], value: str) -> int:
+        """
+        Validate an optional field.
+
+        Args:
+            name (str): The name of the field.
+            validator (List[int]): The list of valid values.
+            value (str): The value to validate.
+
+        Returns:
+            int: The validated value.
+        """
         try:
             result = int(float(value))
             if result not in validator:
-                raise ValueError(f"Invalid {name}: {
-                                 result}. Expected one of {validator}.")
+                raise ValueError(
+                    f"Invalid {name}: {result}. Expected one of {validator}."
+                )
             return result
         except ValueError:
-            raise ValueError(f"Invalid {name}: {
-                             value}. Expected an integer value from {validator}.")
+            raise ValueError(
+                f"Invalid {name}: {value}. Expected an integer value from {validator}."
+            )
 
     @classmethod
     def validate_sensitivity(cls, asset_data: Dict):
-        asset_data['sensitivity'] = cls.validate_optional_field(
-            "sensitivity", list(range(5)), asset_data.get('sensitivity', 0)
+        """
+        Validate the sensitivity field in the asset data.
+
+        Args:
+            asset_data (Dict): The asset data to validate.
+        """
+        asset_data["sensitivity"] = cls.validate_optional_field(
+            "sensitivity", list(range(5)), asset_data.get("sensitivity", 0)
         )
 
     @classmethod
     def validate_exposed(cls, asset_data: Dict):
-        asset_data['exposed'] = cls.validate_optional_field(
-            "exposed", [1, 2], asset_data.get('exposed', 1)
+        """
+        Validate the exposed field in the asset data.
+
+        Args:
+            asset_data (Dict): The asset data to validate.
+        """
+        asset_data["exposed"] = cls.validate_optional_field(
+            "exposed", [1, 2], asset_data.get("exposed", 1)
         )
 
     @classmethod
     def validate_exclude_ips(cls, asset_data: Dict) -> List[str]:
+        """
+        Validate the exclude IPs field in the asset data.
+
+        Args:
+            asset_data (Dict): The asset data to validate.
+
+        Returns:
+            List[str]: The list of validated exclude IPs.
+        """
         validated_exclude_ips = []
-        exclude_ip = asset_data.get('exclude_ip', '')
+        exclude_ip = asset_data.get("exclude_ip", "")
         if exclude_ip:
-            for eip in exclude_ip.split(','):
+            for eip in exclude_ip.split(","):
                 eip = eip.strip()
                 if not cls.is_valid_ipaddress(eip):
-                    raise ValueError(f"Invalid exclude_ip: {
-                                     eip}. Expected a valid IP address.")
+                    raise ValueError(
+                        f"Invalid exclude_ip: {eip}. Expected a valid IP address."
+                    )
                 validated_exclude_ips.append(eip)
         return validated_exclude_ips
 
     @staticmethod
     def is_valid_container_image(url: str) -> bool:
+        """
+        Validate a container image URL.
+
+        Args:
+            url (str): The container image URL to validate.
+
+        Returns:
+            bool: True if the container image URL is valid, False otherwise.
+        """
         regex = re.compile(
-            r'^(?:(?=[^:\/]{1,253})(?!-)[a-zA-Z0-9-]{1,63}(?<!-)(?:\.(?!-)[a-zA-Z0-9-]{1,63}(?<!-))*(?::[0-9]{1,5})?/)?((?![._-])(?:[a-z0-9._-]*)(?<![._-])(?:/(?![._-])[a-z0-9._-]*(?<![._-]))*)(?::(?![.-])[a-zA-Z0-9_.-]{1,128})?$',
-            re.IGNORECASE)
+            r"^(?:(?=[^:\/]{1,253})(?!-)[a-zA-Z0-9-]{1,63}(?<!-)(?:\.(?!-)[a-zA-Z0-9-]{1,63}(?<!-))*(?::[0-9]{1,5})?/)?((?![._-])(?:[a-z0-9._-]*)(?<![._-])(?:/(?![._-])[a-z0-9._-]*(?<![._-]))*)(?::(?![.-])[a-zA-Z0-9_.-]{1,128})?$",
+            re.IGNORECASE,
+        )
         return re.match(regex, url) is not None
 
+    @staticmethod
+    def validate_asset_target(asset_data: Dict):
+        """
+        Validate the asset target field in the asset data.
 
-def unicode_to_ascii(text):
-    ascii_text = unicodedata.normalize('NFKD', text).encode(
-        'ASCII', 'ignore').decode('ASCII')
+        Args:
+            asset_data (Dict): The asset data to validate.
+        """
+        asset_type = asset_data.get("asset_type")
+
+        if asset_type == AssetType.WEB:
+            if not (
+                asset_data.get("asset_target")
+                or asset_data.get("target")
+                or asset_data.get("name")
+            ):
+                raise ValueError(
+                    f"Missing asset target or asset name for asset type {asset_data.get('asset_type')} ."
+                )
+
+        elif asset_type == AssetType.MOBILE:
+            if not (
+                asset_data.get("asset_target")
+                or asset_data.get("target")
+                or asset_data.get("package")
+                or asset_data.get("name")
+            ):
+                raise ValueError(
+                    f"Missing asset target or asset name for asset type {asset_data.get('asset_type')} ."
+                )
+
+        elif asset_type == AssetType.NETWORK:
+            if not (
+                asset_data.get("asset_target")
+                or asset_data.get("target")
+                or asset_data.get("ipaddress")
+                or asset_data.get("hostname")
+                or asset_data.get("mac_address")
+            ):
+                raise ValueError(
+                    f"Missing asset target or asset name for asset type {asset_data.get('asset_type')} ."
+                )
+
+        if not (
+            asset_data.get("asset_target")
+            or asset_data.get("target")
+            or asset_data.get("name")
+        ):
+            raise ValueError(
+                f"Missing asset target or asset name for asset type {asset_data.get('asset_type')} ."
+            )
+
+
+def unicode_to_ascii(text: str) -> str:
+    """
+    Convert Unicode text to ASCII.
+
+    Args:
+        text (str): The text to convert.
+
+    Returns:
+        str: The converted ASCII text.
+    """
+    ascii_text = (
+        unicodedata.normalize("NFKD", text).encode("ASCII", "ignore").decode("ASCII")
+    )
     replacements = {
         '"': '"',
         '"': '"',
-        ''': "'",
-        ''': "'",
-        '–': '-',
-        '—': '-',
-        '…': '...'
+        """: "'",
+        """: "'",
+        "–": "-",
+        "—": "-",
+        "…": "...",
     }
     for unicode_char, ascii_char in replacements.items():
         ascii_text = ascii_text.replace(unicode_char, ascii_char)
-    ascii_text = re.sub(r'[^\x00-\x7F]+', '', ascii_text)
+    ascii_text = re.sub(r"[^\x00-\x7F]+", "", ascii_text)
     return ascii_text
 
 
-def detect_encoding(file_path):
-    with open(file_path, 'rb') as file:
+def detect_encoding(file_path: str) -> str:
+    """
+    Detect the encoding of a file.
+
+    Args:
+        file_path (str): The path to the file.
+
+    Returns:
+        str: The detected encoding.
+    """
+    with open(file_path, "rb") as file:
         raw_data = file.read()
     result = chardet.detect(raw_data)
-    return result['encoding']
+    return result["encoding"]
 
 
 def clean_asset_data(asset_data: Dict) -> Dict:
+    """
+    Clean the asset data by removing extra whitespace and newlines.
+
+    Args:
+        asset_data (Dict): The asset data to clean.
+
+    Returns:
+        Dict: The cleaned asset data.
+    """
+
     def clean_value(value: str) -> str:
-        cleaned = re.sub(r'\s+', ' ', value.strip())
-        cleaned = cleaned.replace('\n', '').replace('\t', '')
+        cleaned = re.sub(r"\s+", " ", value.strip())
+        cleaned = cleaned.replace("\n", "").replace("\t", "")
         return cleaned
 
     important_fields = [
-        'asset_target', 'target', 'ipaddress', 'hostname', 'exclude_ip',
-        'container_image', 'cloud_account_id', 'cloud_region'
+        "asset_target",
+        "target",
+        "ipaddress",
+        "hostname",
+        "exclude_ip",
+        "container_image",
+        "cloud_account_id",
+        "cloud_region",
     ]
 
     cleaned_data = {}
@@ -445,15 +780,28 @@ def clean_asset_data(asset_data: Dict) -> Dict:
     return cleaned_data
 
 
-def convert_and_validate_csv(input_file: str, output_file: str) -> Tuple[List[Dict], List[str]]:
+def convert_and_validate_csv(
+    input_file: str, output_file: str
+) -> Tuple[List[Dict], List[str]]:
+    """
+    Convert and validate the asset data from a CSV file.
+
+    Args:
+        input_file (str): The path to the input CSV file.
+        output_file (str): The path to the output CSV file.
+
+    Returns:
+        Tuple[List[Dict], List[str]]: A tuple containing the list of valid data and the list of errors.
+    """
     input_encoding = detect_encoding(input_file)
     print(f"Detected encoding: {input_encoding}")
 
     valid_data = []
     errors = []
 
-    with open(input_file, 'r', newline='', encoding=input_encoding) as infile, \
-            open(output_file, 'w', newline='', encoding='utf-8') as outfile:
+    with open(input_file, "r", newline="", encoding=input_encoding) as infile, open(
+        output_file, "w", newline="", encoding="utf-8"
+    ) as outfile:
         reader = csv.DictReader(infile)
         fieldnames = reader.fieldnames
 
@@ -475,7 +823,7 @@ def convert_and_validate_csv(input_file: str, output_file: str) -> Tuple[List[Di
 
 
 # Usage
-input_file = "import_assets_from_csv_Network.csv"
+input_file = "import_assets_from_csv_template(1).csv"
 output_file = "converted_and_validated_assets.csv"
 
 valid_data, errors = convert_and_validate_csv(input_file, output_file)
